@@ -1,0 +1,7 @@
+-cp ./src
+
+-js bin/ui.js
+-dce no
+
+-main heaps.debug.browser.Main
+

@@ -1,0 +1,13 @@
+-cp ./src
+-cp ./test/src
+-cp ../src
+
+-lib heaps
+-lib ludi-commons
+-lib heaps-coroutine
+-lib hscript
+-lib hlsdl
+
+-hl test.hl
+
+-main TestServeApp

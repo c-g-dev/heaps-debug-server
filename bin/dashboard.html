@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Heaps Debug Dashboard</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;margin:0;padding:0;background:#0f172a;color:#e2e8f0;}
+header{background:#111827;color:#f9fafb;padding:12px 16px;font-size:18px;font-weight:600;border-bottom:1px solid #1f2937;}
+section{padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+button{background:#2563eb;border:none;color:#fff;padding:8px 12px;border-radius:6px;cursor:pointer;}
+button:hover{background:#1d4ed8;}
+label{display:flex;align-items:center;gap:6px;color:#cbd5e1;}
+#status{color:#93c5fd;}
+
+
+#tree{background:#0b1220;border-top:1px solid #1f2937;margin:0;padding:8px 12px 24px;overflow:auto;max-height:70vh;}
+.node{display:block;line-height:1.4;}
+.node-row{display:flex;align-items:center;gap:6px;padding:2px 0;}
+.caret{width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:#93c5fd;background:transparent;border:1px solid transparent;cursor:pointer;font-size:10px;user-select:none;}
+.caret:hover{border-color:#1f2937;background:#0f172a;}
+.caret.empty{opacity:.25;cursor:default;}
+.label{cursor:pointer;color:#e5e7eb;}
+.label:hover{text-decoration:underline;}
+.children{margin-left:16px;border-left:1px dashed #1f2937;padding-left:10px;}
+.collapsed>.children{display:none;}
+
+
+#modal{position:fixed;inset:0;background:rgba(2,6,23,.7);display:none;align-items:center;justify-content:center;padding:24px;}
+#modal .dialog{background:#0b1220;border:1px solid #1f2937;border-radius:8px;max-width:640px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.4);}
+#modal header{display:flex;align-items:center;justify-content:space-between;background:#0b1220;border-bottom:1px solid #1f2937;padding:10px 14px;font-size:14px;}
+#modal .content{padding:12px 14px;}
+#modal pre{margin:0;background:transparent;color:#cbd5e1;max-height:60vh;overflow:auto;}
+#modal .close{background:#334155;color:#e5e7eb;border:1px solid #475569;border-radius:6px;padding:4px 8px;cursor:pointer;}
+#modal .close:hover{background:#1f2937;}
+
+#modal .field-row{display:flex;align-items:center;gap:8px;margin:6px 0;}
+#modal .field-row label{min-width:72px;color:#cbd5e1;}
+#modal .field-row input[type="number"]{background:#0f172a;border:1px solid #334155;color:#e5e7eb;border-radius:6px;padding:4px 6px;width:110px;}
+#modal .field-row input[type="checkbox"]{transform:scale(1.1);} 
+#modal .apply{background:#2563eb;color:#fff;border:1px solid #1d4ed8;border-radius:6px;padding:4px 8px;cursor:pointer;}
+#modal .apply:hover{background:#1d4ed8;}
+</style>
+</head>
+<body>
+<header>Heaps Debug Dashboard</header>
+<section>
+<button id="refresh">Fetch /scene/dom2d</button>
+<label><input type="checkbox" id="auto"/> Auto-refresh</label>
+<span id="status"></span>
+</section>
+<div id="tree"></div>
+<div id="modal">
+  <div class="dialog">
+    <header>
+      <div>Node properties</div>
+      <button class="close" id="modalClose">Close</button>
+    </header>
+    <div class="content">
+      <div id="modalBody"></div>
+    </div>
+  </div>
+  
+  
+  
+  
+  
+</div>
+<script>
+const treeEl = document.getElementById('tree');
+const statusEl = document.getElementById('status');
+const btn = document.getElementById('refresh');
+const auto = document.getElementById('auto');
+let timer = null;
+
+const modal = document.getElementById('modal');
+const modalBody = document.getElementById('modalBody');
+const modalClose = document.getElementById('modalClose');
+
+function showModalForNode(node){
+  const {children, ...props} = node;
+  
+  const wrap = document.createElement('div');
+  
+  const h = document.createElement('div');
+  h.textContent = `${props.type || 'Object'} — ${props.id || ''}`;
+  h.style.marginBottom = '8px';
+  h.style.color = '#93c5fd';
+  wrap.appendChild(h);
+
+  
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '8px';
+  actions.style.marginBottom = '8px';
+
+  const highlightBtn = document.createElement('button');
+  highlightBtn.className = 'apply';
+  highlightBtn.textContent = 'Highlight';
+  highlightBtn.disabled = !props.id;
+  highlightBtn.addEventListener('click', () => {
+    if (!props.id) return;
+    fetch('/highlightobject', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: String(props.id) });
+  });
+
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'apply';
+  clearBtn.textContent = 'Clear highlight';
+  clearBtn.addEventListener('click', () => {
+    fetch('/highlight/clear', { method: 'POST' });
+  });
+
+  actions.appendChild(highlightBtn);
+  actions.appendChild(clearBtn);
+  wrap.appendChild(actions);
+
+  
+  const fieldMap = { sx: 'scaleX', sy: 'scaleY' };
+
+  function numberField(label, field){
+    const row = document.createElement('div');
+    row.className = 'field-row';
+    const lab = document.createElement('label');
+    lab.textContent = label;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.1';
+    input.value = typeof props[field] === 'number' ? props[field] : 0;
+    const btn = document.createElement('button');
+    btn.className = 'apply';
+    btn.textContent = 'Apply';
+    const send = () => {
+      const v = parseFloat(input.value);
+      if (!isFinite(v)) return;
+      const sendField = fieldMap[field] || field;
+      if (window.HDS && typeof window.HDS.updateObjectField === 'function') {
+        window.HDS.updateObjectField(props.id, sendField, v);
+      }
+      
+      setTimeout(fetchDom, 50);
+    };
+    btn.addEventListener('click', send);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+    row.appendChild(lab);
+    row.appendChild(input);
+    row.appendChild(btn);
+    return row;
+  }
+
+  
+  function boolField(label, field){
+    const row = document.createElement('div');
+    row.className = 'field-row';
+    const lab = document.createElement('label');
+    lab.textContent = label;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !!props[field];
+    input.addEventListener('change', () => {
+      if (window.HDS && typeof window.HDS.updateObjectField === 'function') {
+        window.HDS.updateObjectField(props.id, field, input.checked);
+      }
+      setTimeout(fetchDom, 50);
+    });
+    row.appendChild(lab);
+    row.appendChild(input);
+    return row;
+  }
+
+  wrap.appendChild(numberField('x', 'x'));
+  wrap.appendChild(numberField('y', 'y'));
+  wrap.appendChild(numberField('scaleX', 'sx'));
+  wrap.appendChild(numberField('scaleY', 'sy'));
+  wrap.appendChild(numberField('alpha', 'alpha'));
+  wrap.appendChild(boolField('visible', 'visible'));
+
+  
+  const pre = document.createElement('pre');
+  pre.textContent = JSON.stringify(props, null, 2);
+  pre.style.marginTop = '12px';
+  wrap.appendChild(pre);
+
+  modalBody.innerHTML = '';
+  modalBody.appendChild(wrap);
+  modal.style.display = 'flex';
+}
+
+function hideModal(){
+  modal.style.display = 'none';
+}
+modal.addEventListener('click', (e) => {
+  if (e.target === modal) hideModal();
+});
+modalClose.addEventListener('click', hideModal);
+
+function buildNode(node){
+  const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+
+  const nodeEl = document.createElement('div');
+  nodeEl.className = 'node' + (hasChildren ? '' : ' leaf');
+
+  const row = document.createElement('div');
+  row.className = 'node-row';
+
+  const caret = document.createElement('span');
+  caret.className = 'caret' + (hasChildren ? '' : ' empty');
+  caret.textContent = hasChildren ? '▸' : '·';
+  if (hasChildren){
+    caret.addEventListener('click', () => {
+      const collapsed = nodeEl.classList.toggle('collapsed');
+      caret.textContent = collapsed ? '▸' : '▾';
+    });
+  }
+
+  const label = document.createElement('span');
+  label.className = 'label';
+  const name = node.type || 'Object';
+  label.textContent = name;
+  label.addEventListener('click', () => showModalForNode(node));
+
+  row.appendChild(caret);
+  row.appendChild(label);
+  nodeEl.appendChild(row);
+
+  const childrenWrap = document.createElement('div');
+  childrenWrap.className = 'children';
+  if (hasChildren){
+    for (const child of node.children){
+      childrenWrap.appendChild(buildNode(child));
+    }
+  }
+  nodeEl.appendChild(childrenWrap);
+
+  
+  if (hasChildren){
+    nodeEl.classList.remove('collapsed');
+    caret.textContent = '▾';
+  }
+
+  return nodeEl;
+}
+
+function renderTree(data){
+  treeEl.innerHTML = '';
+  treeEl.appendChild(buildNode(data));
+}
+
+function fetchDom(){
+  statusEl.textContent = 'Loading...';
+  fetch('/scene/dom2d').then(r => r.json()).then(d => {
+    renderTree(d);
+    statusEl.textContent = 'OK';
+  });
+}
+btn.addEventListener('click', fetchDom);
+auto.addEventListener('change', () => {
+  if (auto.checked) { timer = setInterval(fetchDom, 1000); fetchDom(); }
+  else { clearInterval(timer); timer = null; }
+});
+window.addEventListener('load', fetchDom);
+</script>
+</body>
+</html>
